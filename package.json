@@ -1,0 +1,79 @@
+{
+  "name": "v2-game-optimizer",
+  "version": "0.1.0",
+  "description": "Desktop app for competitive gaming optimization",
+  "author": "V2 Game Optimizer",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "npm run build && electron-builder",
+    "package:full": "npm run python:bundle && npm run build && electron-builder",
+    "dev:renderer": "vite --config vite.renderer.config.ts",
+    "python:install": "pip install -r python/requirements.txt",
+    "python:bundle": "python -m PyInstaller python/sidecar.spec --distpath python/dist --workpath python/build --noconfirm"
+  },
+  "build": {
+    "appId": "com.v2gameoptimizer.app",
+    "productName": "V2 Game Optimizer",
+    "copyright": "Copyright © 2025 V2 Game Optimizer",
+    "directories": {
+      "buildResources": "resources",
+      "output": "dist-installer"
+    },
+    "extraResources": [
+      {
+        "from": "python/dist/sidecar.exe",
+        "to": "sidecar.exe"
+      },
+      {
+        "from": "src/renderer/src/assets/icon-tray.png",
+        "to": "icon-tray.png"
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "requestedExecutionLevel": "requireAdministrator",
+      "artifactName": "V2-Game-Optimizer-Setup-${version}.exe",
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "V2 Game Optimizer",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": null
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^1.0.1",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.17",
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1",
+    "electron-vite": "^2.0.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "i18next": "^26.2.0",
+    "lucide-react": "^0.358.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^17.0.8",
+    "react-router-dom": "^6.22.0",
+    "recharts": "^2.12.0"
+  }
+}

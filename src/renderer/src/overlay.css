@@ -1,0 +1,18 @@
+/* Applied only when the page is the overlay window */
+html, body, #root {
+  background: transparent !important;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+.overlay-root {
+  background: rgba(10, 10, 15, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  width: 100%;
+  height: 100%;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
