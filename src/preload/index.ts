@@ -30,8 +30,9 @@ const api = {
     move:            (x: number, y: number) => ipcRenderer.invoke('overlay:move', x, y),
     setClickThrough: (through: boolean) => ipcRenderer.invoke('overlay:setClickThrough', through),
     onStats:         (cb: (stats: unknown) => void) => {
-      ipcRenderer.on('overlay:stats', (_event, data) => cb(data))
-      return () => ipcRenderer.removeAllListeners('overlay:stats')
+      const handler = (_event: unknown, data: unknown) => cb(data)
+      ipcRenderer.on('overlay:stats', handler)
+      return () => ipcRenderer.removeListener('overlay:stats', handler)
     },
   }
 }

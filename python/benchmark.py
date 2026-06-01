@@ -104,7 +104,7 @@ def _latency_benchmark() -> dict:
 def run_benchmark() -> dict:
     results: dict = {}
     results["cpu"]     = _cpu_benchmark()
-    results["disk"]    = _disk_benchmark(size_mb=32)
+    results["disk"]    = _disk_benchmark(size_mb=64)
     results["ram"]     = _ram_info()
     results["latency"] = _latency_benchmark()
 

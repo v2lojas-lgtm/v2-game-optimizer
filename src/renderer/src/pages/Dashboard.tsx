@@ -141,8 +141,8 @@ export default function Dashboard() {
         setAlerts(prev => [alert, ...prev].slice(0, 3))
         setTimeout(() => setAlerts(prev => prev.filter(a => a !== alert)), 30000)
       }
-      if (event === 'game_stop' && data?.summary) {
-        setSession(data.summary)
+      if (event === 'session_summary' && data) {
+        setSession(data as SessionSummary)
       }
       if (event === 'game_start') {
         setSession(null)

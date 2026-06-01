@@ -1,6 +1,6 @@
 {
   "name": "v2-game-optimizer",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Desktop app for competitive gaming optimization",
   "author": "V2 Game Optimizer",
   "main": "./out/main/index.js",

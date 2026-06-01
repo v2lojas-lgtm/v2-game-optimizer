@@ -74,10 +74,14 @@ def _disable_fullscreen_optimizations() -> str:
 def _enable_hardware_accelerated_gpu() -> str:
     try:
         import winreg
-        path = r"SOFTWARE\Microsoft\DirectX\UserGpuPreferences"
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+            0, winreg.KEY_SET_VALUE
+        )
+        winreg.SetValueEx(key, "HwSchMode", 0, winreg.REG_DWORD, 2)
         winreg.CloseKey(key)
-        return "GPU aceleração por hardware: configurado"
+        return "HAGS ativado — GPU gerencia própria memória (requer reinicialização)"
     except Exception as e:
         return f"HAGS: {e}"
 

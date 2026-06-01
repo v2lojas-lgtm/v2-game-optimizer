@@ -47,8 +47,8 @@ function MainShell() {
         const enabled = localStorage.getItem('v2_autoclose_procs') === 'true'
         if (!enabled) return
         try {
-          const procs = await window.api.python.invoke('interference_processes') as Array<{ pid: number; name: string; running: boolean }>
-          const targets = (procs ?? []).filter(p => p.running)
+          const result = await window.api.python.invoke('interference_processes') as { processes: Array<{ pid: number; name: string; exe: string }> }
+          const targets = result?.processes ?? []
           if (targets.length === 0) return
           const pids = targets.map(p => p.pid)
           await window.api.python.invoke('close_selected', { pids })

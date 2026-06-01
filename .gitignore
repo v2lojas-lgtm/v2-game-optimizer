@@ -4,3 +4,7 @@ python/build/
 python/dist/
 out/
 .env
+senhas.txt
+*.txt
+*.log
+tsconfig.*.tsbuildinfo

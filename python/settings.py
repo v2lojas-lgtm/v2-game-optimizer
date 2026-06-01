@@ -86,7 +86,7 @@ def clear_history(history_type: str) -> dict:
 
 def get_app_info() -> dict:
     return {
-        "version": "1.0.0",
+        "version": "1.0.0",  # sync with package.json
         "python":  sys.version.split()[0],
         "platform": sys.platform,
     }

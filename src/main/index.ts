@@ -2,7 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, Notific
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { PythonBridge } from './python-bridge'
-import { registerOverlayIpc, destroyOverlayWindow } from './overlay-window'
+import { registerOverlayIpc, destroyOverlayWindow, createOverlayWindow, isOverlayOpen } from './overlay-window'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -198,7 +198,11 @@ app.whenReady().then(() => {
   createTray()
 
   globalShortcut.register('CommandOrControl+Shift+O', () => {
-    ipcMain.emit('overlay:toggle')
+    if (isOverlayOpen()) {
+      destroyOverlayWindow()
+    } else {
+      createOverlayWindow(pythonBridge)
+    }
   })
 
   app.on('activate', () => {
