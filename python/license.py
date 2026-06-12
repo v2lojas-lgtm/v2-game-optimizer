@@ -1,5 +1,5 @@
 """
-License management: hardware fingerprint, key activation, validation.
+License management: hardware fingerprint, key activation, validation, trial.
 
 Uses the V2 license server (Vercel):
   POST /api/activate   → activates key for this machine
@@ -7,6 +7,11 @@ Uses the V2 license server (Vercel):
   POST /api/deactivate → releases the activation slot
 
 Test key (local only, never hits the network): V2GO-TEST-0000-0000
+
+Trial logic:
+  - On first launch with no license file, a 30-day free trial starts automatically.
+  - During trial: check_license returns {"valid": True, "trial": True, "days_remaining": N}
+  - After trial expires: returns {"valid": False, "reason": "trial_expired"}
 """
 
 import hashlib
@@ -25,7 +30,8 @@ except ImportError:
 
 _TEST_KEY     = "V2GO-TEST-0000-0000"
 _GRACE_DAYS   = 3    # days allowed offline before re-validation
-_SERVER       = "https://v2-license-server.vercel.app"
+_TRIAL_DAYS   = 30   # free trial period on first launch
+_SERVER       = "https://v2-license-server-xi.vercel.app"
 _LICENSE_FILE = Path(os.environ.get("APPDATA", Path.home())) / "V2GameOptimizer" / "license.json"
 
 
@@ -65,16 +71,31 @@ def _save(data: dict) -> None:
 
 # ── License server API ─────────────────────────────────────────────────────────
 
+class _ServerRejectedError(Exception):
+    """Server responded with 4xx — explicit rejection (invalid key, wrong machine, etc.)."""
+
 def _server_request(endpoint: str, payload: dict) -> dict:
-    """POST to our license server. Returns parsed JSON or raises."""
+    """POST to our license server. Returns parsed JSON or raises.
+    Raises _ServerRejectedError for 4xx (explicit rejection).
+    Raises other exceptions for 5xx / network errors (server unavailable).
+    """
     body = json.dumps(payload).encode()
     req  = urllib.request.Request(
         f"{_SERVER}/api/{endpoint}",
         data=body,
         headers={"Accept": "application/json", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if 400 <= e.code < 500:
+            try:
+                body_json = json.loads(e.read())
+            except Exception:
+                body_json = {}
+            raise _ServerRejectedError(body_json.get("error", "Chave inválida")) from e
+        raise
 
 
 def _server_activate(key: str, machine_id: str) -> tuple[bool, str, str | None]:
@@ -88,14 +109,21 @@ def _server_activate(key: str, machine_id: str) -> tuple[bool, str, str | None]:
         return False, f"Erro de conexão: {e}", None
 
 
-def _server_validate(key: str, machine_id: str) -> tuple[bool, str]:
+def _server_validate(key: str, machine_id: str) -> tuple[bool, str, bool]:
+    """Returns (is_valid, message, is_server_error).
+    is_server_error=True means the server was unreachable or crashed (5xx/timeout) —
+    callers should not block the user in this case.
+    is_server_error=False with ok=False means explicit rejection (wrong machine, expired, etc.).
+    """
     try:
         data = _server_request("validate", {"license_key": key, "machine_id": machine_id})
         if data.get("valid"):
-            return True, "ok"
-        return False, data.get("error", "Chave inválida ou expirada")
+            return True, "ok", False
+        return False, data.get("error", "Chave inválida ou expirada"), False
+    except _ServerRejectedError as e:
+        return False, str(e), False
     except Exception as e:
-        return False, f"Erro de conexão: {e}"
+        return False, f"Erro de conexão: {e}", True
 
 
 def _server_deactivate(key: str, machine_id: str) -> tuple[bool, str]:
@@ -110,17 +138,46 @@ def _server_deactivate(key: str, machine_id: str) -> tuple[bool, str]:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
+def _start_trial() -> None:
+    """Create a trial record on first launch."""
+    now = time.time()
+    trial_ends_at = now + _TRIAL_DAYS * 86400
+    _save({
+        "trial": True,
+        "trial_started_at": int(now),
+        "trial_ends_at":    int(trial_ends_at),
+        "machine_id":       get_machine_id(),
+    })
+
+
 def check_license() -> dict:
     """
     Returns:
-      {"valid": True,  "key": "...", "reason": "ok",          "expires_at": <ts>, "days_remaining": <int>}
-      {"valid": False, "key": None,  "reason": "not_activated"}
-      {"valid": False, "key": "...", "reason": "wrong_machine"}
-      {"valid": False, "key": "...", "reason": "expired",     "expires_at": <ts>, "days_remaining": 0}
-      {"valid": False, "key": "...", "reason": "grace_expired"}
+      {"valid": True,  "trial": True,  "reason": "trial",   "days_remaining": <int>}  ← free trial active
+      {"valid": False, "key": None,    "reason": "trial_expired"}                       ← trial ended, no key
+      {"valid": True,  "key": "...",   "reason": "ok",       "expires_at": <ts>, "days_remaining": <int>}
+      {"valid": False, "key": None,    "reason": "not_activated"}
+      {"valid": False, "key": "...",   "reason": "wrong_machine"}
+      {"valid": False, "key": "...",   "reason": "expired",  "expires_at": <ts>, "days_remaining": 0}
+      {"valid": False, "key": "...",   "reason": "grace_expired"}
     """
     data = _load()
-    if not data or not data.get("key"):
+
+    # First launch ever: start the free trial
+    if not data:
+        _start_trial()
+        data = _load()
+
+    # Trial mode (no license key yet)
+    if data.get("trial") and not data.get("key"):
+        now       = time.time()
+        trial_end = float(data.get("trial_ends_at", 0))
+        remaining = max(0, int((trial_end - now) / 86400))
+        if now > trial_end:
+            return {"valid": False, "key": None, "reason": "trial_expired"}
+        return {"valid": True, "trial": True, "reason": "trial", "days_remaining": remaining}
+
+    if not data.get("key"):
         return {"valid": False, "key": None, "reason": "not_activated"}
 
     machine_id = get_machine_id()
@@ -155,11 +212,11 @@ def check_license() -> dict:
     days_since = (now - last_ok) / 86400
 
     if key != _TEST_KEY and days_since > _GRACE_DAYS:
-        ok, _ = _server_validate(key, machine_id)
+        ok, _, is_server_error = _server_validate(key, machine_id)
         if ok:
             data["last_validated"] = int(now)
             _save(data)
-        else:
+        elif not is_server_error:
             return {"valid": False, "key": key, "reason": "grace_expired"}
 
     return {
