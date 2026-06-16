@@ -14,7 +14,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 sys.stdin  = io.TextIOWrapper(sys.stdin.buffer,  encoding='utf-8', errors='replace')
 
 from hardware import get_hardware_info, get_quick_stats
-from network import run_network_test, run_gamer_network_test
+from network import run_network_test, run_gamer_network_test, ping_game_servers
 from optimizer import run_optimizations, get_available_optimizations
 from processes import get_process_list, close_closeable_processes, terminate_pid, get_interference_processes, close_selected_processes
 from benchmark import run_benchmark
@@ -24,9 +24,14 @@ from database import (
     save_integrity, get_integrity_history,
     save_optimization, get_optimization_history,
 )
-from game_profiles import get_profiles, detect_running_game, set_cs2_launch_options
+from game_profiles import (
+    get_profiles, detect_running_game, set_cs2_launch_options,
+    apply_valorant_settings, apply_lol_settings,
+    _VALORANT_COMPETITIVE, _VALORANT_QUALITY,
+    _LOL_COMPETITIVE, _LOL_QUALITY,
+)
 from settings import get_startup, set_startup, clear_history, get_app_info
-from license import check_license, activate_key, deactivate, get_machine_id
+from license import check_license, activate_key, deactivate, get_machine_id, request_code, verify_code
 from latency import create_restore_point, get_restore_points
 from diagnosis import run_diagnosis, run_smart_optimize
 from database import get_diagnosis_history
@@ -72,12 +77,17 @@ HANDLERS = {
     "game_profiles":         lambda args: get_profiles(),
     "detect_game":           lambda args: detect_running_game(),
     "set_cs2_options":       lambda args: set_cs2_launch_options(args["options"]) if args else {"ok": False},
+    "set_valorant_options":  lambda args: apply_valorant_settings(_VALORANT_COMPETITIVE if (args or {}).get("mode") == "competitive" else _VALORANT_QUALITY) if args else {"ok": False},
+    "set_lol_options":       lambda args: apply_lol_settings(_LOL_COMPETITIVE if (args or {}).get("mode") == "competitive" else _LOL_QUALITY) if args else {"ok": False},
+    "game_server_ping":      lambda args: ping_game_servers(),
     "get_startup":           lambda args: get_startup(),
     "set_startup":           lambda args: set_startup(bool(args.get("enabled"))) if args else {"ok": False},
     "clear_history":         lambda args: clear_history(args.get("type", "all")) if args else clear_history("all"),
     "app_info":              lambda args: get_app_info(),
     "check_license":         lambda args: check_license(),
     "activate_key":          lambda args: activate_key(args.get("key", "")) if args else {"ok": False, "error": "key required"},
+    "request_code":          lambda args: request_code(args.get("email", "")) if args else {"ok": False, "error": "email required"},
+    "verify_code":           lambda args: verify_code(args.get("email", ""), args.get("code", "")) if args else {"ok": False, "error": "email and code required"},
     "deactivate":            lambda args: deactivate(),
     "machine_id":            lambda args: {"id": get_machine_id()},
     "boost_status":          lambda args: watcher.get_status(),
