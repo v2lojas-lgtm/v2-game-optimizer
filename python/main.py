@@ -31,7 +31,7 @@ from game_profiles import (
     _LOL_COMPETITIVE, _LOL_QUALITY,
 )
 from settings import get_startup, set_startup, clear_history, get_app_info
-from license import check_license, activate_key, deactivate, get_machine_id, request_code, verify_code
+from license import check_license, activate_key, deactivate, get_machine_id, login
 from latency import create_restore_point, get_restore_points
 from diagnosis import run_diagnosis, run_smart_optimize
 from database import get_diagnosis_history
@@ -86,8 +86,7 @@ HANDLERS = {
     "app_info":              lambda args: get_app_info(),
     "check_license":         lambda args: check_license(),
     "activate_key":          lambda args: activate_key(args.get("key", "")) if args else {"ok": False, "error": "key required"},
-    "request_code":          lambda args: request_code(args.get("email", "")) if args else {"ok": False, "error": "email required"},
-    "verify_code":           lambda args: verify_code(args.get("email", ""), args.get("code", "")) if args else {"ok": False, "error": "email and code required"},
+    "login":                 lambda args: login(args.get("email", ""), args.get("password", "")) if args else {"ok": False, "error": "email and password required"},
     "deactivate":            lambda args: deactivate(),
     "machine_id":            lambda args: {"id": get_machine_id()},
     "boost_status":          lambda args: watcher.get_status(),

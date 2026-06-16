@@ -1,11 +1,15 @@
 """
 License management: hardware fingerprint, key activation, validation, trial.
 
-Uses the V2 license server (Vercel):
-  POST /api/activate   → activates key for this machine
-  POST /api/validate   → checks if key is still valid for this machine
-  POST /api/deactivate → releases the activation slot
+Two ways to unlock the app:
+  1. Login (current): e-mail + password, same account as the mk20-loja store.
+     POST {LOJA}/api/v2go/login         → logs in + registers this machine
+     POST {LOJA}/api/v2go/check-status  → periodic re-validation (no password)
+     POST {LOJA}/api/v2go/logout        → releases this machine's slot
+  2. Legacy license key (kept as a fallback for older purchases):
+     POST {LICENSE_SERVER}/api/activate / validate / deactivate
 
+Test account (local only, never hits the network): test@v2go.dev / test1234
 Test key (local only, never hits the network): V2GO-TEST-0000-0000
 
 Trial logic:
@@ -28,13 +32,14 @@ try:
 except ImportError:
     _HAS_WINREG = False
 
-_TEST_KEY     = "V2GO-TEST-0000-0000"
-_TEST_EMAIL   = "test@v2go.dev"   # local-only, never hits the network
-_TEST_CODE    = "000000"
-_GRACE_DAYS   = 3    # days allowed offline before re-validation
-_TRIAL_DAYS   = 30   # free trial period on first launch
-_SERVER       = "https://v2-license-server-xi.vercel.app"
-_LICENSE_FILE = Path(os.environ.get("APPDATA", Path.home())) / "V2GameOptimizer" / "license.json"
+_TEST_KEY      = "V2GO-TEST-0000-0000"
+_TEST_EMAIL    = "test@v2go.dev"   # local-only, never hits the network
+_TEST_PASSWORD = "test1234"
+_GRACE_DAYS    = 3    # days allowed offline before re-validation
+_TRIAL_DAYS    = 30   # free trial period on first launch
+_LICENSE_SERVER = "https://v2-license-server-xi.vercel.app"   # legacy key flow only
+_LOJA_SERVER    = "https://mk20creative.com/loja"               # login flow (current)
+_LICENSE_FILE   = Path(os.environ.get("APPDATA", Path.home())) / "V2GameOptimizer" / "license.json"
 
 
 # ── Machine fingerprint ────────────────────────────────────────────────────────
@@ -71,19 +76,18 @@ def _save(data: dict) -> None:
     _LICENSE_FILE.write_text(json.dumps(data), encoding="utf-8")
 
 
-# ── License server API ─────────────────────────────────────────────────────────
-
 class _ServerRejectedError(Exception):
-    """Server responded with 4xx — explicit rejection (invalid key, wrong machine, etc.)."""
+    """Server responded with 4xx — explicit rejection (invalid key/credentials, etc.)."""
 
-def _server_request(endpoint: str, payload: dict) -> dict:
-    """POST to our license server. Returns parsed JSON or raises.
+
+def _post_json(base: str, path: str, payload: dict) -> dict:
+    """POST to `base + path`. Returns parsed JSON or raises.
     Raises _ServerRejectedError for 4xx (explicit rejection).
     Raises other exceptions for 5xx / network errors (server unavailable).
     """
     body = json.dumps(payload).encode()
     req  = urllib.request.Request(
-        f"{_SERVER}/api/{endpoint}",
+        f"{base}{path}",
         data=body,
         headers={"Accept": "application/json", "Content-Type": "application/json"},
     )
@@ -96,16 +100,17 @@ def _server_request(endpoint: str, payload: dict) -> dict:
                 body_json = json.loads(e.read())
             except Exception:
                 body_json = {}
-            raise _ServerRejectedError(body_json.get("error", "Chave inválida")) from e
+            raise _ServerRejectedError(body_json.get("error", "Erro de autenticação")) from e
         raise
 
 
+# ── Legacy license-key flow (v2-license-server) — kept as a fallback ──────────
+
 def _server_activate(key: str, machine_id: str) -> tuple[bool, str, str | None]:
     try:
-        data = _server_request("activate", {"license_key": key, "machine_id": machine_id})
+        data = _post_json(_LICENSE_SERVER, "/api/activate", {"license_key": key, "machine_id": machine_id})
         if data.get("success"):
-            expires_at = data.get("expires_at")
-            return True, "ok", expires_at
+            return True, "ok", data.get("expires_at")
         return False, data.get("error", "Chave inválida"), None
     except Exception as e:
         return False, f"Erro de conexão: {e}", None
@@ -115,10 +120,9 @@ def _server_validate(key: str, machine_id: str) -> tuple[bool, str, bool]:
     """Returns (is_valid, message, is_server_error).
     is_server_error=True means the server was unreachable or crashed (5xx/timeout) —
     callers should not block the user in this case.
-    is_server_error=False with ok=False means explicit rejection (wrong machine, expired, etc.).
     """
     try:
-        data = _server_request("validate", {"license_key": key, "machine_id": machine_id})
+        data = _post_json(_LICENSE_SERVER, "/api/validate", {"license_key": key, "machine_id": machine_id})
         if data.get("valid"):
             return True, "ok", False
         return False, data.get("error", "Chave inválida ou expirada"), False
@@ -130,7 +134,7 @@ def _server_validate(key: str, machine_id: str) -> tuple[bool, str, bool]:
 
 def _server_deactivate(key: str, machine_id: str) -> tuple[bool, str]:
     try:
-        data = _server_request("deactivate", {"license_key": key, "machine_id": machine_id})
+        data = _post_json(_LICENSE_SERVER, "/api/deactivate", {"license_key": key, "machine_id": machine_id})
         if data.get("ok"):
             return True, "ok"
         return False, data.get("error", "Erro ao desativar")
@@ -138,48 +142,38 @@ def _server_deactivate(key: str, machine_id: str) -> tuple[bool, str]:
         return False, f"Erro de conexão: {e}"
 
 
-# ── E-mail-based activation (no key) ────────────────────────────────────────
+# ── Login flow (mk20-loja) — current ────────────────────────────────────────────
 
-def _server_request_code(email: str) -> tuple[bool, str]:
+def _loja_login(email: str, password: str, machine_id: str) -> tuple[bool, str, str | None]:
     try:
-        data = _server_request("request-code", {"email": email})
+        data = _post_json(_LOJA_SERVER, "/api/v2go/login", {
+            "email": email, "password": password, "machineId": machine_id,
+        })
         if data.get("ok"):
-            return True, "ok"
-        return False, data.get("error", "Erro ao enviar código")
-    except _ServerRejectedError as e:
-        return False, str(e)
-    except Exception as e:
-        return False, f"Erro de conexão: {e}"
-
-
-def _server_verify_code(email: str, code: str, machine_id: str) -> tuple[bool, str, str | None]:
-    try:
-        data = _server_request("verify-code", {"email": email, "code": code, "machine_id": machine_id})
-        if data.get("success"):
-            return True, "ok", data.get("expires_at")
-        return False, data.get("error", "Código inválido"), None
+            return True, "ok", data.get("expiresAt")
+        return False, data.get("error", "E-mail ou senha incorretos"), None
     except _ServerRejectedError as e:
         return False, str(e), None
     except Exception as e:
         return False, f"Erro de conexão: {e}", None
 
 
-def _server_validate_email(email: str, machine_id: str) -> tuple[bool, str, bool]:
-    """Same contract as _server_validate, but keyed by email instead of license key."""
+def _loja_check_status(email: str, machine_id: str) -> tuple[bool, str, bool]:
+    """Returns (is_valid, message, is_server_error) — same contract as _server_validate."""
     try:
-        data = _server_request("validate-email", {"email": email, "machine_id": machine_id})
+        data = _post_json(_LOJA_SERVER, "/api/v2go/check-status", {"email": email, "machineId": machine_id})
         if data.get("valid"):
             return True, "ok", False
-        return False, data.get("error", "E-mail inválido ou expirado"), False
+        return False, data.get("error", "Assinatura inativa"), False
     except _ServerRejectedError as e:
         return False, str(e), False
     except Exception as e:
         return False, f"Erro de conexão: {e}", True
 
 
-def _server_deactivate_email(email: str, machine_id: str) -> tuple[bool, str]:
+def _loja_logout(email: str, machine_id: str) -> tuple[bool, str]:
     try:
-        data = _server_request("deactivate-email", {"email": email, "machine_id": machine_id})
+        data = _post_json(_LOJA_SERVER, "/api/v2go/logout", {"email": email, "machineId": machine_id})
         if data.get("ok"):
             return True, "ok"
         return False, data.get("error", "Erro ao desativar")
@@ -205,12 +199,12 @@ def check_license() -> dict:
     """
     Returns:
       {"valid": True,  "trial": True,  "reason": "trial",   "days_remaining": <int>}  ← free trial active
-      {"valid": False, "key": None,    "reason": "trial_expired"}                       ← trial ended, no key
-      {"valid": True,  "key": "...",   "reason": "ok",       "expires_at": <ts>, "days_remaining": <int>}
-      {"valid": False, "key": None,    "reason": "not_activated"}
-      {"valid": False, "key": "...",   "reason": "wrong_machine"}
-      {"valid": False, "key": "...",   "reason": "expired",  "expires_at": <ts>, "days_remaining": 0}
-      {"valid": False, "key": "...",   "reason": "grace_expired"}
+      {"valid": False, "reason": "trial_expired"}                                       ← trial ended, no login
+      {"valid": True,  "email"/"key": "...", "reason": "ok", "expires_at": <ts>, "days_remaining": <int>}
+      {"valid": False, "reason": "not_activated"}
+      {"valid": False, "reason": "wrong_machine"}
+      {"valid": False, "reason": "expired",  "expires_at": <ts>, "days_remaining": 0}
+      {"valid": False, "reason": "grace_expired"}
     """
     data = _load()
 
@@ -219,7 +213,7 @@ def check_license() -> dict:
         _start_trial()
         data = _load()
 
-    # Trial mode (no license key/email yet)
+    # Trial mode (no login/key yet)
     if data.get("trial") and not data.get("key") and not data.get("email"):
         now       = time.time()
         trial_end = float(data.get("trial_ends_at", 0))
@@ -268,7 +262,7 @@ def check_license() -> dict:
     if days_since > _GRACE_DAYS:
         if is_email_based:
             if identifier != _TEST_EMAIL:
-                ok, _, is_server_error = _server_validate_email(identifier, machine_id)
+                ok, _, is_server_error = _loja_check_status(identifier, machine_id)
                 if ok:
                     data["last_validated"] = int(now)
                     _save(data)
@@ -293,9 +287,50 @@ def check_license() -> dict:
     }
 
 
+def login(email: str, password: str) -> dict:
+    """
+    Logs in with the same e-mail+password as the customer's mk20-loja account
+    and registers this machine. Returns {"ok": True, "email": "..."} or
+    {"ok": False, "error": "..."}.
+    """
+    email    = (email or "").strip().lower()
+    password = password or ""
+    if not email or not password:
+        return {"ok": False, "error": "E-mail e senha são obrigatórios"}
+
+    machine_id = get_machine_id()
+
+    if email == _TEST_EMAIL:
+        if password != _TEST_PASSWORD:
+            return {"ok": False, "error": "E-mail ou senha incorretos"}
+        from datetime import datetime, timezone, timedelta
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
+        _save({
+            "email": email,
+            "machine_id": machine_id,
+            "activated_at": int(time.time()),
+            "last_validated": int(time.time()),
+            "expires_at": expires_at,
+        })
+        return {"ok": True, "email": email}
+
+    ok, msg, expires_at = _loja_login(email, password, machine_id)
+    if not ok:
+        return {"ok": False, "error": msg}
+
+    _save({
+        "email": email,
+        "machine_id": machine_id,
+        "activated_at": int(time.time()),
+        "last_validated": int(time.time()),
+        "expires_at": expires_at,
+    })
+    return {"ok": True, "email": email}
+
+
 def activate_key(key: str) -> dict:
     """
-    Activate key on this machine.
+    Activate a legacy license key on this machine (fallback for older purchases).
     Returns {"ok": True, "key": "..."} or {"ok": False, "error": "..."}
     """
     key = key.strip().upper()
@@ -317,7 +352,7 @@ def activate_key(key: str) -> dict:
         })
         return {"ok": True, "key": key}
 
-    # Real key — activate via our server
+    # Real key — activate via the legacy license server
     ok, msg, expires_at = _server_activate(key, machine_id)
     if not ok:
         return {"ok": False, "error": msg}
@@ -330,64 +365,6 @@ def activate_key(key: str) -> dict:
         "expires_at": expires_at,
     })
     return {"ok": True, "key": key}
-
-
-def request_code(email: str) -> dict:
-    """
-    Sends a 6-digit activation code to the given email, if it has an active license.
-    Returns {"ok": True} or {"ok": False, "error": "..."}
-    """
-    email = (email or "").strip().lower()
-    if not email:
-        return {"ok": False, "error": "E-mail não pode estar vazio"}
-
-    if email == _TEST_EMAIL:
-        return {"ok": True}
-
-    ok, msg = _server_request_code(email)
-    if not ok:
-        return {"ok": False, "error": msg}
-    return {"ok": True}
-
-
-def verify_code(email: str, code: str) -> dict:
-    """
-    Verifies the code and activates this machine for the given email.
-    Returns {"ok": True, "email": "..."} or {"ok": False, "error": "..."}
-    """
-    email = (email or "").strip().lower()
-    code  = (code or "").strip()
-    if not email or not code:
-        return {"ok": False, "error": "E-mail e código são obrigatórios"}
-
-    machine_id = get_machine_id()
-
-    if email == _TEST_EMAIL:
-        if code != _TEST_CODE:
-            return {"ok": False, "error": "Código inválido"}
-        from datetime import datetime, timezone, timedelta
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
-        _save({
-            "email": email,
-            "machine_id": machine_id,
-            "activated_at": int(time.time()),
-            "last_validated": int(time.time()),
-            "expires_at": expires_at,
-        })
-        return {"ok": True, "email": email}
-
-    ok, msg, expires_at = _server_verify_code(email, code, machine_id)
-    if not ok:
-        return {"ok": False, "error": msg}
-
-    _save({
-        "email": email,
-        "machine_id": machine_id,
-        "activated_at": int(time.time()),
-        "last_validated": int(time.time()),
-        "expires_at": expires_at,
-    })
-    return {"ok": True, "email": email}
 
 
 def deactivate() -> dict:
@@ -403,7 +380,7 @@ def deactivate() -> dict:
     if key and key != _TEST_KEY:
         _server_deactivate(key, machine_id)
     elif email and email != _TEST_EMAIL:
-        _server_deactivate_email(email, machine_id)
+        _loja_logout(email, machine_id)
 
     try:
         if _LICENSE_FILE.exists():

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Mail, Hash, Key, CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
+import { Mail, Lock, Key, CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import logoImg from '../assets/lgo.png.png'
 
 interface Props {
@@ -9,30 +9,26 @@ interface Props {
 
 const TEST_KEY = 'V2GO-TEST-0000-0000'
 const TEST_EMAIL = 'test@v2go.dev'
+const TEST_PASSWORD = 'test1234'
 
 function formatKey(raw: string): string {
   const clean = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16)
   return clean.match(/.{1,4}/g)?.join('-') ?? clean
 }
 
-function formatCode(raw: string): string {
-  return raw.replace(/\D/g, '').slice(0, 6)
-}
-
 export default function Activation({ onActivated, mode = 'activate' }: Props) {
   const isRenew        = mode === 'renew'
   const isTrialExpired = mode === 'trial_expired'
 
-  // 'email' = novo fluxo (e-mail + código). 'legacy' = chave antiga, mantida como rede de segurança.
-  const [authMethod, setAuthMethod] = useState<'email' | 'legacy'>('email')
-  const [stage, setStage]           = useState<'email' | 'code'>('email')
+  // 'login' = login com a conta da loja (e-mail+senha). 'legacy' = chave antiga, mantida como rede de segurança.
+  const [authMethod, setAuthMethod] = useState<'login' | 'legacy'>('login')
 
-  const [email, setEmail]     = useState('')
-  const [code, setCode]       = useState('')
-  const [key, setKey]         = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [email, setEmail]       = useState('')
+  const [password, setPassword] = useState('')
+  const [key, setKey]           = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+  const [success, setSuccess]   = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleEmailInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,9 +36,9 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
     setEmail(e.target.value)
   }
 
-  const handleCodeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePasswordInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null)
-    setCode(formatCode(e.target.value))
+    setPassword(e.target.value)
   }
 
   const handleKeyInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -50,40 +46,20 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
     setKey(formatKey(e.target.value))
   }
 
-  const requestCode = async () => {
-    const trimmed = email.trim()
-    if (!trimmed) return
+  const doLogin = async () => {
+    if (!emailValid || !password) return
     setLoading(true)
     setError(null)
     try {
-      const result = await window.api.python.invoke('request_code', { email: trimmed }) as any
-      if (result?.ok) {
-        setStage('code')
-      } else {
-        setError(result?.error ?? 'Erro ao enviar código')
-      }
-    } catch (e: any) {
-      setError(e?.message ?? 'Erro ao enviar código')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const confirmCode = async () => {
-    const trimmedCode = code.trim()
-    if (trimmedCode.length !== 6) return
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await window.api.python.invoke('verify_code', { email: email.trim(), code: trimmedCode }) as any
+      const result = await window.api.python.invoke('login', { email: email.trim(), password }) as any
       if (result?.ok) {
         setSuccess(true)
         setTimeout(onActivated, 1200)
       } else {
-        setError(result?.error ?? 'Código inválido')
+        setError(result?.error ?? 'E-mail ou senha incorretos')
       }
     } catch (e: any) {
-      setError(e?.message ?? 'Erro ao validar o código')
+      setError(e?.message ?? 'Erro ao entrar')
     } finally {
       setLoading(false)
     }
@@ -109,10 +85,10 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
     }
   }
 
-  const fillTestEmail = () => {
+  const fillTestLogin = () => {
     setEmail(TEST_EMAIL)
+    setPassword(TEST_PASSWORD)
     setError(null)
-    inputRef.current?.focus()
   }
 
   const fillTestKey = () => {
@@ -122,8 +98,8 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
   }
 
   const emailValid = /\S+@\S+\.\S+/.test(email.trim())
-  const codeValid  = code.length === 6
-  const keyValid   = key.replace(/-/g, '').length === 16
+  const loginValid = emailValid && password.length > 0
+  const keyValid    = key.replace(/-/g, '').length === 16
 
   return (
     <div
@@ -189,7 +165,7 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
                   borderRadius: '4px',
                   padding: '2px 8px',
                 }}>
-                  {isTrialExpired ? 'AVALIAÇÃO ENCERRADA' : 'LICENÇA EXPIRADA'}
+                  {isTrialExpired ? 'AVALIAÇÃO ENCERRADA' : 'ASSINATURA VENCIDA'}
                 </span>
               </div>
             )}
@@ -206,160 +182,136 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
               {isTrialExpired
                 ? 'ASSINE PARA CONTINUAR USANDO'
                 : isRenew
-                ? 'RENOVE PARA CONTINUAR USANDO'
-                : 'ATIVE SEU ACESSO PARA CONTINUAR'}
+                ? 'REGULARIZE PARA CONTINUAR USANDO'
+                : 'ENTRE PARA CONTINUAR'}
             </p>
           </div>
         </div>
 
         {/* Activation card */}
         <div className="card-glow space-y-5">
-          {authMethod === 'email' ? (
+          {authMethod === 'login' ? (
             <>
               <div className="flex items-center gap-2" style={{ color: 'rgba(174,234,248,0.55)' }}>
-                {stage === 'email' ? <Mail size={14} /> : <Hash size={14} />}
+                <Mail size={14} />
                 <span style={{
                   fontFamily: 'Rajdhani, sans-serif',
                   fontSize: '0.7rem',
                   letterSpacing: '0.16em',
                   fontWeight: 600,
                 }}>
-                  {stage === 'email' ? 'SEU E-MAIL DE COMPRA' : 'CÓDIGO RECEBIDO POR E-MAIL'}
+                  ENTRAR COM SUA CONTA MK20
                 </span>
               </div>
 
-              {stage === 'email' ? (
-                <div className="space-y-3">
-                  <input
-                    ref={inputRef}
-                    type="email"
-                    value={email}
-                    onChange={handleEmailInput}
-                    onKeyDown={e => e.key === 'Enter' && emailValid && !loading && requestCode()}
-                    placeholder="seu@email.com"
-                    spellCheck={false}
-                    style={{
-                      width: '100%',
-                      background: 'rgba(2,15,41,0.8)',
-                      border: `1px solid ${error ? 'rgba(255,51,102,0.5)' : 'rgba(28,115,191,0.25)'}`,
-                      borderRadius: '10px',
-                      padding: '12px 16px',
-                      textAlign: 'center',
-                      fontFamily: 'JetBrains Mono, monospace',
-                      fontSize: '0.95rem',
-                      color: '#fff',
-                      outline: 'none',
-                      transition: 'border-color 0.2s, box-shadow 0.2s',
-                      boxShadow: error ? '0 0 12px rgba(255,51,102,0.15)' : 'none',
-                    }}
-                    onFocus={e => {
-                      if (!error) e.target.style.borderColor = 'rgba(174,234,248,0.4)'
-                      if (!error) e.target.style.boxShadow = '0 0 16px rgba(28,115,191,0.2)'
-                    }}
-                    onBlur={e => {
-                      if (!error) e.target.style.borderColor = 'rgba(28,115,191,0.25)'
-                      if (!error) e.target.style.boxShadow = 'none'
-                    }}
-                  />
-                  {error && (
-                    <div className="flex items-center gap-2 text-xs" style={{ color: '#ff3366' }}>
-                      <AlertCircle size={13} className="shrink-0" />
-                      {error}
-                    </div>
-                  )}
+              <div className="space-y-3">
+                <input
+                  ref={inputRef}
+                  type="email"
+                  value={email}
+                  onChange={handleEmailInput}
+                  onKeyDown={e => e.key === 'Enter' && loginValid && !loading && doLogin()}
+                  placeholder="seu@email.com"
+                  spellCheck={false}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(2,15,41,0.8)',
+                    border: `1px solid ${error ? 'rgba(255,51,102,0.5)' : 'rgba(28,115,191,0.25)'}`,
+                    borderRadius: '10px',
+                    padding: '12px 16px',
+                    textAlign: 'center',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '0.95rem',
+                    color: '#fff',
+                    outline: 'none',
+                    transition: 'border-color 0.2s, box-shadow 0.2s',
+                    boxShadow: error ? '0 0 12px rgba(255,51,102,0.15)' : 'none',
+                  }}
+                  onFocus={e => {
+                    if (!error) e.target.style.borderColor = 'rgba(174,234,248,0.4)'
+                    if (!error) e.target.style.boxShadow = '0 0 16px rgba(28,115,191,0.2)'
+                  }}
+                  onBlur={e => {
+                    if (!error) e.target.style.borderColor = 'rgba(28,115,191,0.25)'
+                    if (!error) e.target.style.boxShadow = 'none'
+                  }}
+                />
+
+                <div className="flex items-center gap-2" style={{ color: 'rgba(174,234,248,0.55)' }}>
+                  <Lock size={14} />
+                  <span style={{
+                    fontFamily: 'Rajdhani, sans-serif',
+                    fontSize: '0.7rem',
+                    letterSpacing: '0.16em',
+                    fontWeight: 600,
+                  }}>SENHA</span>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-xs" style={{ color: 'rgba(200,204,232,0.5)' }}>
-                    Enviamos um código de 6 dígitos para <strong style={{ color: '#fff' }}>{email}</strong>.
-                  </p>
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    inputMode="numeric"
-                    value={code}
-                    onChange={handleCodeInput}
-                    onKeyDown={e => e.key === 'Enter' && codeValid && !loading && confirmCode()}
-                    placeholder="000000"
-                    maxLength={6}
-                    spellCheck={false}
-                    style={{
-                      width: '100%',
-                      background: 'rgba(2,15,41,0.8)',
-                      border: `1px solid ${error ? 'rgba(255,51,102,0.5)' : success ? 'rgba(0,255,136,0.4)' : 'rgba(28,115,191,0.25)'}`,
-                      borderRadius: '10px',
-                      padding: '12px 16px',
-                      textAlign: 'center',
-                      fontFamily: 'JetBrains Mono, monospace',
-                      fontSize: '1.4rem',
-                      letterSpacing: '0.4em',
-                      color: '#fff',
-                      outline: 'none',
-                      transition: 'border-color 0.2s, box-shadow 0.2s',
-                      boxShadow: error
-                        ? '0 0 12px rgba(255,51,102,0.15)'
-                        : success
-                        ? '0 0 12px rgba(0,255,136,0.15)'
-                        : 'none',
-                    }}
-                    onFocus={e => {
-                      if (!error && !success) e.target.style.borderColor = 'rgba(174,234,248,0.4)'
-                      if (!error && !success) e.target.style.boxShadow = '0 0 16px rgba(28,115,191,0.2)'
-                    }}
-                    onBlur={e => {
-                      if (!error && !success) e.target.style.borderColor = 'rgba(28,115,191,0.25)'
-                      if (!error && !success) e.target.style.boxShadow = 'none'
-                    }}
-                  />
 
-                  {error && (
-                    <div className="flex items-center gap-2 text-xs" style={{ color: '#ff3366' }}>
-                      <AlertCircle size={13} className="shrink-0" />
-                      {error}
-                    </div>
-                  )}
+                <input
+                  type="password"
+                  value={password}
+                  onChange={handlePasswordInput}
+                  onKeyDown={e => e.key === 'Enter' && loginValid && !loading && doLogin()}
+                  placeholder="••••••••"
+                  style={{
+                    width: '100%',
+                    background: 'rgba(2,15,41,0.8)',
+                    border: `1px solid ${error ? 'rgba(255,51,102,0.5)' : success ? 'rgba(0,255,136,0.4)' : 'rgba(28,115,191,0.25)'}`,
+                    borderRadius: '10px',
+                    padding: '12px 16px',
+                    textAlign: 'center',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '0.95rem',
+                    color: '#fff',
+                    outline: 'none',
+                    transition: 'border-color 0.2s, box-shadow 0.2s',
+                    boxShadow: error
+                      ? '0 0 12px rgba(255,51,102,0.15)'
+                      : success
+                      ? '0 0 12px rgba(0,255,136,0.15)'
+                      : 'none',
+                  }}
+                  onFocus={e => {
+                    if (!error && !success) e.target.style.borderColor = 'rgba(174,234,248,0.4)'
+                    if (!error && !success) e.target.style.boxShadow = '0 0 16px rgba(28,115,191,0.2)'
+                  }}
+                  onBlur={e => {
+                    if (!error && !success) e.target.style.borderColor = 'rgba(28,115,191,0.25)'
+                    if (!error && !success) e.target.style.boxShadow = 'none'
+                  }}
+                />
 
-                  {success && (
-                    <div className="flex items-center gap-2 text-xs" style={{ color: '#00ff88' }}>
-                      <CheckCircle size={13} className="shrink-0" />
-                      {isRenew ? 'Acesso renovado! Entrando...' : 'Acesso liberado! Entrando...'}
-                    </div>
-                  )}
+                {error && (
+                  <div className="flex items-center gap-2 text-xs" style={{ color: '#ff3366' }}>
+                    <AlertCircle size={13} className="shrink-0" />
+                    {error}
+                  </div>
+                )}
 
-                  {!success && (
-                    <div className="flex items-center justify-between">
-                      <button
-                        onClick={() => { setStage('email'); setCode(''); setError(null) }}
-                        style={{ fontSize: '0.7rem', color: 'rgba(174,234,248,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
-                      >
-                        ← Usar outro e-mail
-                      </button>
-                      <button
-                        onClick={requestCode}
-                        disabled={loading}
-                        style={{ fontSize: '0.7rem', color: 'rgba(174,234,248,0.5)', background: 'none', border: 'none', cursor: 'pointer' }}
-                      >
-                        Reenviar código
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+                {success && (
+                  <div className="flex items-center gap-2 text-xs" style={{ color: '#00ff88' }}>
+                    <CheckCircle size={13} className="shrink-0" />
+                    {isRenew ? 'Acesso regularizado! Entrando...' : 'Login OK! Entrando...'}
+                  </div>
+                )}
+
+                <p className="text-xs text-center" style={{ color: 'rgba(200,204,232,0.35)' }}>
+                  Use o mesmo e-mail e senha da sua conta em mk20creative.com
+                </p>
+              </div>
 
               <button
-                onClick={stage === 'email' ? requestCode : confirmCode}
-                disabled={(stage === 'email' ? !emailValid : !codeValid) || loading || success}
+                onClick={doLogin}
+                disabled={!loginValid || loading || success}
                 className="btn-primary w-full"
-                style={((stage === 'email' ? !emailValid : !codeValid) || loading || success) ? { opacity: 0.35, cursor: 'not-allowed', transform: 'none' } : {}}
+                style={(!loginValid || loading || success) ? { opacity: 0.35, cursor: 'not-allowed', transform: 'none' } : {}}
               >
                 {loading ? (
-                  <><Loader2 size={14} className="animate-spin" /> {stage === 'email' ? 'ENVIANDO...' : 'VALIDANDO...'}</>
+                  <><Loader2 size={14} className="animate-spin" /> ENTRANDO...</>
                 ) : success ? (
-                  <><CheckCircle size={14} /> {isRenew ? 'RENOVADO' : 'ATIVADO'}</>
-                ) : stage === 'email' ? (
-                  'ENVIAR CÓDIGO'
+                  <><CheckCircle size={14} /> {isRenew ? 'REGULARIZADO' : 'CONECTADO'}</>
                 ) : (
-                  isRenew ? 'RENOVAR ACESSO' : 'CONFIRMAR CÓDIGO'
+                  isRenew ? 'REGULARIZAR E ENTRAR' : 'ENTRAR'
                 )}
               </button>
             </>
@@ -448,9 +400,8 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
 
           <button
             onClick={() => {
-              setAuthMethod(authMethod === 'email' ? 'legacy' : 'email')
+              setAuthMethod(authMethod === 'login' ? 'legacy' : 'login')
               setError(null)
-              setStage('email')
             }}
             style={{
               fontSize: '0.65rem',
@@ -462,7 +413,7 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
               width: '100%',
             }}
           >
-            {authMethod === 'email' ? 'Tenho uma chave de licença antiga' : '← Voltar pra ativação por e-mail'}
+            {authMethod === 'login' ? 'Tenho uma chave de licença antiga' : '← Voltar pro login'}
           </button>
         </div>
 
@@ -512,7 +463,7 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
               onMouseLeave={e => (e.currentTarget.style.color = isRenew ? 'rgba(255,214,10,0.6)' : 'rgba(28,115,191,0.7)')}
             >
               <ExternalLink size={11} />
-              {isRenew ? 'RENOVAR ACESSO' : 'ASSINAR AGORA'}
+              {isRenew ? 'GERENCIAR ASSINATURA' : 'ASSINAR AGORA'}
             </a>
           )}
 
@@ -523,7 +474,7 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
                 MODO TESTE
               </p>
               <button
-                onClick={authMethod === 'email' ? fillTestEmail : fillTestKey}
+                onClick={authMethod === 'login' ? fillTestLogin : fillTestKey}
                 style={{
                   fontFamily: 'JetBrains Mono, monospace',
                   fontSize: '0.7rem',
@@ -537,11 +488,8 @@ export default function Activation({ onActivated, mode = 'activate' }: Props) {
                 onMouseEnter={e => (e.currentTarget.style.color = 'rgba(174,234,248,0.6)')}
                 onMouseLeave={e => (e.currentTarget.style.color = 'rgba(200,204,232,0.25)')}
               >
-                {authMethod === 'email' ? TEST_EMAIL : TEST_KEY}
+                {authMethod === 'login' ? `${TEST_EMAIL} / ${TEST_PASSWORD}` : TEST_KEY}
               </button>
-              {authMethod === 'email' && stage === 'code' && (
-                <p style={{ fontSize: '0.65rem', color: 'rgba(200,204,232,0.2)', marginTop: '4px' }}>código: 000000</p>
-              )}
             </div>
           )}
         </div>
