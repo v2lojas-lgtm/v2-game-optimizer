@@ -10,6 +10,7 @@ interface ClearResult { ok: boolean; cleared?: string[]; error?: string }
 interface LicenseInfo {
   valid: boolean
   key: string | null
+  email?: string | null
   reason: string
   expires_at?: number
   days_remaining?: number
@@ -224,22 +225,24 @@ export default function Settings() {
 
       {/* Licença */}
       <div>
-        <SectionTitle>{t('settings.license_section')}</SectionTitle>
+        <SectionTitle>{licInfo?.email ? 'Conta' : t('settings.license_section')}</SectionTitle>
         <div className="card space-y-0">
 
-          {/* Chave + validade */}
+          {/* Conta (e-mail) ou Chave legada */}
           <Row
-            label={t('settings.license_key')}
+            label={licInfo?.email ? 'Conta ativa' : t('settings.license_key')}
             sub={licInfo?.valid && licInfo.expires_at
               ? `${t('settings.expires_at')} ${formatExpiry(licInfo.expires_at)}`
-              : t('settings.license_sub')}
+              : licInfo?.email ? 'Assinatura MK20 Creative' : t('settings.license_sub')}
           >
             {licenseQ.loading
               ? <span className="text-xs text-slate-600">{t('common.loading')}</span>
               : licInfo?.valid
               ? <div className="flex items-center gap-2">
                   <CheckCircle size={13} className="text-emerald-400" />
-                  <span className="font-mono text-xs text-slate-400">{licInfo.key}</span>
+                  <span className="font-mono text-xs text-slate-400">
+                    {licInfo.email ?? licInfo.key}
+                  </span>
                 </div>
               : licInfo?.reason === 'expired'
               ? <span className="text-xs text-red-400 font-medium">{t('settings.expired_lbl')}</span>
@@ -254,7 +257,7 @@ export default function Settings() {
               sub={t('settings.days_remaining', { days: licInfo.days_remaining ?? 0 })}
             >
               <a
-                href="https://v2gameoptimizer.com"
+                href={licInfo.email ? 'https://mk20creative.com/loja/conta/assinaturas' : 'https://mk20creative.com/loja/produto/v2-game-optimizer'}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-1.5 text-xs font-medium transition-colors"
@@ -268,9 +271,12 @@ export default function Settings() {
             </Row>
           )}
 
-          {/* Desativar */}
+          {/* Desativar / Sair */}
           {licInfo?.valid && !deactivated && (
-            <Row label={t('settings.deactivate')} sub={t('settings.deactivate_sub')}>
+            <Row
+              label={licInfo.email ? 'Sair desta máquina' : t('settings.deactivate')}
+              sub={licInfo.email ? 'Permite fazer login em outro PC' : t('settings.deactivate_sub')}
+            >
               <button
                 onClick={handleDeactivate}
                 disabled={deactivateQ.loading}
